@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+aiohttp
+psutil
+requests
+python-multipart
+schedule
+pydantic
