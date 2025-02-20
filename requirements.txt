@@ -1,9 +1,7 @@
-fastapi
-uvicorn
-aiohttp
-psutil
-requests
-python-multipart
-schedule
-pydantic
-httpx
+fastapi==0.103.1
+uvicorn==0.23.2
+httpx==0.24.1
+pydantic==2.3.0
+python-multipart==0.0.6
+croniter==2.0.1
+pytz==2023.3
