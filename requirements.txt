@@ -6,3 +6,35 @@ python-multipart==0.0.6
 croniter==2.0.1
 pytz==2023.3
 schedule
+
+# Testing frameworks
+pytest==8.0.0
+pytest-tornasync==0.6.0.post2
+pytest-trio==0.8.0
+pytest-twisted==1.14.0
+
+
+# Additional utilities
+python-json-logger==2.0.7
+python-multipart==0.0.6
+
+# Type checking
+typing-extensions==4.9.0
+
+# HTTP client for async requests
+aiohttp==3.9.3
+
+# Date handling
+python-dateutil==2.8.2
+
+# For development and testing
+black==24.1.1
+flake8==7.0.0
+mypy==1.8.0
+isort==5.13.2
+
+# For handling environment variables
+python-dotenv==1.0.1
+
+# For working with paths
+pathlib==1.0.1

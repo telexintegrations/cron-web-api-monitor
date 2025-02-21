@@ -6,13 +6,14 @@ from typing import List, Optional, Dict, Any
 import uvicorn
 from datetime import datetime
 import httpx
-import schedule
-import time
 import asyncio
 from cron_monitor import CronMonitor, CronJobConfig
+import json
+import random
+import threading
 
 # Constants
-WEBHOOK_URL = "https://ping.telex.im/v1/webhooks/019517d3-7a2e-7f80-8cfb-614494172063"  # Replace with your webhook ID
+WEBHOOK_URL = "https://ping.telex.im/v1/webhooks/019517d3-7a2e-7f80-8cfb-614494172063"
 
 class CronJob(BaseModel):
     name: str
@@ -33,7 +34,7 @@ class MonitorPayload(BaseModel):
 
 app = FastAPI(
     title="Cron Job Monitor",
-    description="Automated cron job monitoring with interval-based checks",
+    description="Automated cron job monitoring with simulated jobs and interval-based checks",
     version="1.0.0"
 )
 
@@ -45,8 +46,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global variable to store monitoring configurations
-monitoring_configs = []
+# Global monitor instance
+monitor = CronMonitor(log_path="logs/cron_monitor.log")
 
 @app.get("/")
 async def root():
@@ -59,7 +60,7 @@ async def get_integration_json(request: Request):
     return {
         "descriptions": {
             "app_name": "Cron Monitor",
-            "app_description": "Monitor cron jobs and their execution status",
+            "app_description": "Monitor cron jobs and their execution status with simulated job support",
             "app_url": base_url,
             "app_logo": "https://example.com/cron-monitor-logo.png",
             "background_color": "#4A90E2"
@@ -72,12 +73,20 @@ async def get_integration_json(request: Request):
                 "label": "Check Interval",
                 "type": "dropdown",
                 "required": True,
-                "default": "*/15 * * * *",
+                "default": "*/1 * * * *",  # Changed to every minute
                 "options": [
+                    "*/1 * * * *",    # Every minute
                     "*/5 * * * *",    # Every 5 minutes
                     "*/15 * * * *",   # Every 15 minutes
                     "0 * * * *",      # Hourly
                 ]
+            },
+            {
+                "label": "Simulation Mode",
+                "type": "boolean",
+                "required": False,
+                "default": True,
+                "description": "Enable job simulation for testing"
             },
             {
                 "label": "Cron Jobs",
@@ -87,9 +96,16 @@ async def get_integration_json(request: Request):
                     {
                         "name": "Daily Backup",
                         "pattern": "backup.sh",
-                        "max_duration": 120,
-                        "log_file": "/var/log/cron/backup.log",
+                        "max_duration": 5,
+                        "log_file": "logs/backup.log",
                         "expected_output": "Backup completed successfully"
+                    },
+                    {
+                        "name": "Data Cleanup",
+                        "pattern": "cleanup.sh",
+                        "max_duration": 3,
+                        "log_file": "logs/cleanup.log",
+                        "expected_output": "Cleanup finished"
                     }
                 ]""",
                 "placeholder": "Enter cron job configurations"
@@ -101,64 +117,88 @@ async def get_integration_json(request: Request):
 async def run_monitoring_task(payload: MonitorPayload):
     """Background task to run cron monitoring checks"""
     try:
-        monitor = CronMonitor(log_path="logs/cron_monitor.log")
-        
         # Parse cron jobs from settings
-        cron_jobs = []
-        if "Cron Jobs" in payload.settings:
-            import json
-            jobs_config = json.loads(payload.settings["Cron Jobs"])
-            cron_jobs = [CronJobConfig(**job) for job in jobs_config]
+        jobs_config = payload.settings.get("Cron Jobs", "[]")
+        if isinstance(jobs_config, str):
+            jobs_config = json.loads(jobs_config)
+        elif isinstance(jobs_config, list):
+            jobs_config = jobs_config
+        else:
+            jobs_config = json.loads(str(jobs_config))
+            
+        cron_jobs = [CronJobConfig(**job) for job in jobs_config]
+        
+        # Setup simulated jobs if enabled
+        if payload.settings.get("Simulation Mode", True):
+            monitor.setup_simulated_jobs(cron_jobs)
+            
+            # Randomly start jobs (30% chance)
+            if random.random() < 0.3:
+                monitor.start_random_job()
 
-        results = []
-        for job_config in cron_jobs:
-            # Check job logs
-            log_status = monitor.check_job_logs(job_config)
-            
-            # Get active job status
-            active_jobs = monitor.get_active_cron_jobs()
-            is_running = any(job_config.pattern in job['command'] for job in active_jobs)
-            
-            results.append({
-                "name": job_config.name,
-                "status": "ok" if log_status["status"] == "ok" and is_running else "error",
-                "message": log_status["message"],
-                "running": is_running
-            })
+        # Run monitoring checks
+        results = monitor.monitor_jobs(cron_jobs)
+
+        # Convert results to serializable format
+        formatted_results = []
+        for result in results:
+            formatted_result = {
+                "name": str(result["name"]),
+                "status": str(result["status"]),
+                "message": str(result["message"]),
+                "running": bool(result["running"])
+            }
+            formatted_results.append(formatted_result)
 
         # Prepare message for webhook
-        status = all(r["status"] == "ok" for r in results)
-        message = "Cron Job Status Report:\n\n"
-        for result in results:
-            emoji = "✅" if result["status"] == "ok" else "🚨"
-            message += f"{emoji} {result['name']}: {result['message']}\n"
-            if not result["running"]:
-                message += "   ⚠️ Job not currently running\n"
+        status = all(r["status"] == "ok" for r in formatted_results)
+        message = "🔍 Cron Job Status Report:\n\n"
+        
+        for result in formatted_results:
+            status_emoji = {
+                "ok": "✅",
+                "warning": "⚠️",
+                "error": "🚨",
+                "running": "⚙️"
+            }.get(result["status"], "❓")
+            
+            message += f"{status_emoji} {result['name']}\n"
+            message += f"   Status: {result['status'].upper()}\n"
+            message += f"   Details: {result['message']}\n"
+            if result["running"]:
+                message += f"   🔄 Currently running\n"
+            message += "\n"
+
+        # Prepare webhook payload
+        webhook_payload = {
+            "username": "Cron Monitor",
+            "event_name": "Cron Check",
+            "status": "success" if status else "error",
+            "message": message
+        }
 
         # Send results to webhook
         async with httpx.AsyncClient() as client:
             await client.post(
                 payload.return_url,
-                json={
-                    "username": "Cron Monitor",
-                    "event_name": "Cron Check",
-                    "status": "success" if status else "error",
-                    "message": message
-                }
+                json=webhook_payload
             )
 
     except Exception as e:
         error_msg = f"🚨 Monitoring task failed: {str(e)}"
+        webhook_error_payload = {
+            "username": "Cron Monitor",
+            "event_name": "Monitoring Error",
+            "status": "error",
+            "message": error_msg
+        }
+        
         async with httpx.AsyncClient() as client:
             await client.post(
                 payload.return_url,
-                json={
-                    "username": "Cron Monitor",
-                    "event_name": "Monitoring Error",
-                    "status": "error",
-                    "message": error_msg
-                }
+                json=webhook_error_payload
             )
+
 
 @app.post("/tick")
 async def handle_tick(payload: MonitorPayload, background_tasks: BackgroundTasks):
@@ -167,7 +207,6 @@ async def handle_tick(payload: MonitorPayload, background_tasks: BackgroundTasks
         if not payload.channel_id:
             raise HTTPException(status_code=400, detail="Missing channel_id")
             
-        # Schedule monitoring task
         background_tasks.add_task(run_monitoring_task, payload)
         
         return {
@@ -182,6 +221,15 @@ async def handle_tick(payload: MonitorPayload, background_tasks: BackgroundTasks
 async def monitor_jobs(request: MonitorPayload, background_tasks: BackgroundTasks):
     """Manual monitoring endpoint for testing"""
     try:
+        # Ensure proper job configuration structure
+        if not request.monitoring_config:
+            request.monitoring_config = MonitoringConfig(
+                cron_jobs=[
+                    CronJob(**job) for job in request.settings.get("Cron Jobs", [])
+                ],
+                monitoring_types=["cron"]
+            )
+        
         background_tasks.add_task(run_monitoring_task, request)
         return {
             "status": "accepted",
@@ -191,23 +239,143 @@ async def monitor_jobs(request: MonitorPayload, background_tasks: BackgroundTask
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-def schedule_monitoring():
-    """Schedule monitoring tasks every 2 minutes"""
-    for payload in monitoring_configs:
-        schedule.every(2).minutes.do(asyncio.run, run_monitoring_task(payload))
+# Updated monitoring task function
+async def run_monitoring_task(payload: MonitorPayload):
+    """Background task to run cron monitoring checks"""
+    try:
+        # Get cron jobs from monitoring config or settings
+        if payload.monitoring_config and payload.monitoring_config.cron_jobs:
+            cron_jobs = [CronJobConfig(**job.dict()) for job in payload.monitoring_config.cron_jobs]
+        else:
+            # Parse cron jobs from settings
+            jobs_config = payload.settings.get("Cron Jobs", [])
+            if isinstance(jobs_config, str):
+                jobs_config = json.loads(jobs_config)
+            cron_jobs = [CronJobConfig(**job) for job in jobs_config]
 
-async def start_scheduler():
-    """Start the scheduler in the background"""
-    while True:
-        schedule.run_pending()
-        await asyncio.sleep(1)
+        # Setup simulated jobs if enabled
+        if payload.settings.get("Simulation Mode", True):
+            monitor.setup_simulated_jobs(cron_jobs)
+            
+            # Randomly start jobs (30% chance)
+            if random.random() < 0.3:
+                monitor.start_random_job()
 
-@app.on_event("startup")
-async def startup_event():
-    """Start the scheduler when the application starts"""
-    asyncio.create_task(start_scheduler())
+        # Run monitoring checks
+        results = monitor.monitor_jobs(cron_jobs)
+
+        # Format and send results as before...
+        formatted_results = []
+        for result in results:
+            formatted_result = {
+                "name": str(result["name"]),
+                "status": str(result["status"]),
+                "message": str(result["message"]),
+                "running": bool(result["running"])
+            }
+            formatted_results.append(formatted_result)
+
+        status = all(r["status"] == "ok" for r in formatted_results)
+        message = "🔍 Cron Job Status Report:\n\n"
+        
+        for result in formatted_results:
+            status_emoji = {
+                "ok": "✅",
+                "warning": "⚠️",
+                "error": "🚨",
+                "running": "⚙️"
+            }.get(result["status"], "❓")
+            
+            message += f"{status_emoji} {result['name']}\n"
+            message += f"   Status: {result['status'].upper()}\n"
+            message += f"   Details: {result['message']}\n"
+            if result["running"]:
+                message += f"   🔄 Currently running\n"
+            message += "\n"
+
+        webhook_payload = {
+            "username": "Cron Monitor",
+            "event_name": "Cron Check",
+            "status": "success" if status else "error",
+            "message": message
+        }
+
+        async with httpx.AsyncClient() as client:
+            await client.post(
+                payload.return_url,
+                json=webhook_payload
+            )
+
+    except Exception as e:
+        error_msg = f"🚨 Monitoring task failed: {str(e)}"
+        webhook_error_payload = {
+            "username": "Cron Monitor",
+            "event_name": "Monitoring Error",
+            "status": "error",
+            "message": error_msg
+        }
+        
+        async with httpx.AsyncClient() as client:
+            await client.post(
+                payload.return_url,
+                json=webhook_error_payload
+            )
+@app.get("/status")
+async def get_status():
+    """Get current status of all monitored jobs"""
+    try:
+        return {
+            "status": "success",
+            "data": monitor.last_check_results,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/simulate/start")
+async def start_job(job_name: str):
+    """Manually start a simulated job"""
+    try:
+        if job_name in monitor.simulated_jobs:
+            job = monitor.simulated_jobs[job_name]
+            if not job.is_running:
+                threading.Thread(target=job.run).start()
+                return {
+                    "status": "success",
+                    "message": f"Started job: {job_name}",
+                    "timestamp": datetime.now().isoformat()
+                }
+            else:
+                return {
+                    "status": "warning",
+                    "message": f"Job {job_name} is already running",
+                    "timestamp": datetime.now().isoformat()
+                }
+        else:
+            raise HTTPException(status_code=404, detail=f"Job {job_name} not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/jobs")
+async def list_jobs():
+    """List all configured jobs and their current status"""
+    try:
+        jobs = []
+        for name, job in monitor.simulated_jobs.items():
+            jobs.append({
+                "name": name,
+                "running": job.is_running,
+                "log_file": job.log_file,
+                "last_status": monitor.last_check_results.get(name, {})
+            })
+        
+        return {
+            "status": "success",
+            "data": jobs,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
-
-
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
