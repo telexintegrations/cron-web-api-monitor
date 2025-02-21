@@ -57,63 +57,48 @@ async def root():
 async def get_integration_json(request: Request):
     """Provide integration configuration for Telex"""
     base_url = str(request.base_url).rstrip("/")
-    return {
-        "descriptions": {
-            "app_name": "Cron Monitor",
-            "app_description": "Monitor cron jobs and their execution status with simulated job support",
-            "app_url": base_url,
-            "app_logo": "https://example.com/cron-monitor-logo.png",
-            "background_color": "#4A90E2"
-        },
-        "integration_type": "interval",
-        "integration_category": "Monitoring & Logging",
-        "webhook_url": WEBHOOK_URL,
-        "settings": [
-            {
-                "label": "Check Interval",
-                "type": "dropdown",
-                "required": True,
-                "default": "*/1 * * * *",  # Changed to every minute
-                "options": [
-                    "*/1 * * * *",    # Every minute
-                    "*/5 * * * *",    # Every 5 minutes
-                    "*/15 * * * *",   # Every 15 minutes
-                    "0 * * * *",      # Hourly
-                ]
+    return JSONResponse({
+        "data": {
+            "date": {
+                "created_at": "2025-02-21",  
+                "updated_at": "2025-02-20"   
             },
-            {
-                "label": "Simulation Mode",
-                "type": "boolean",
-                "required": False,
-                "default": True,
-                "description": "Enable job simulation for testing"
+            "descriptions": {
+                "app_name": "Cron Monitor",
+                "app_description": "Monitor cron jobs and their execution status with simulated job support",
+                "app_logo": "https://example.com/cron-monitor-logo.png",
+                "app_url": base_url,  # Use base_url here
+                "background_color": "#fff"  # Changed to #fff
             },
-            {
-                "label": "Cron Jobs",
-                "type": "json",
-                "required": True,
-                "default": """[
-                    {
-                        "name": "Daily Backup",
-                        "pattern": "backup.sh",
-                        "max_duration": 5,
-                        "log_file": "logs/backup.log",
-                        "expected_output": "Backup completed successfully"
-                    },
-                    {
-                        "name": "Data Cleanup",
-                        "pattern": "cleanup.sh",
-                        "max_duration": 3,
-                        "log_file": "logs/cleanup.log",
-                        "expected_output": "Cleanup finished"
-                    }
-                ]""",
-                "placeholder": "Enter cron job configurations"
-            }
-        ],
-        "tick_url": f"{base_url}/tick"
-    }
-
+            "is_active": True,
+            "integration_type": "interval",
+            "integration_category": "Monitoring & Logging",
+            "key_features": [
+                "Real-time cron job monitoring",  # Removed extra quotes
+                "Simulated job execution for testing",
+                "Alerting via webhooks",
+                "Customizable check intervals",
+                "Detailed logging and reporting"
+            ],
+            "author": "bruce oyufi",
+            "settings": [
+                {
+                    "label": "Check Interval",
+                    "type": "dropdown",
+                    "required": True,
+                    "default": "*/1 * * * *",
+                    "options": [
+                        "*/1 * * * *",
+                        "*/5 * * * *",
+                        "*/15 * * * *",
+                        "0 * * * *"
+                    ]
+                }
+            ],
+            "target_url": WEBHOOK_URL,
+            "tick_url": f"{base_url}/tick"
+        }
+    })
 async def run_monitoring_task(payload: MonitorPayload):
     """Background task to run cron monitoring checks"""
     try:
