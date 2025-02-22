@@ -1,21 +1,28 @@
 
 {
-    "version": 2,
-    "builds": [
-      {
-        "src": "app.py",
-        "use": "@vercel/python"
-      }
-    ],
-    "routes": [
-      {
-        "src": "/(.*)",
-        "dest": "app.py"
-      }
-    ],
-    "env": {
-      "PYTHONUNBUFFERED": "1"
+  "version": 2,
+  "builds": [
+    {
+      "src": "app.py",
+      "use": "@vercel/python"
     }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "app.py"
+    }
+  ],
+  "functions": {
+    "app.py": {
+      "runtime": "python3.9"
+    }
+  },
+  "env": {
+    "PYTHONUNBUFFERED": "1",
+    "WEBHOOK_URL": "https://ping.telex.im/v1/webhooks/01952c5a-d68b-7c5f-bd0e-6e691c8a7f35",
+    "MONITOR_INTERVAL": "60"
   }
+}
   
  

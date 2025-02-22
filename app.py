@@ -6,10 +6,11 @@ from datetime import datetime
 import httpx
 import asyncio
 import random
+import os
 
 # Constants
-WEBHOOK_URL = "https://ping.telex.im/v1/webhooks/01952c5a-d68b-7c5f-bd0e-6e691c8a7f35"
-MONITOR_INTERVAL = 60  # 1 minute in seconds
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "https://ping.telex.im/v1/webhooks/01952c5a-d68b-7c5f-bd0e-6e691c8a7f35")
+MONITOR_INTERVAL = int(os.environ.get("MONITOR_INTERVAL", 60))  
 
 app = FastAPI(
     title="Cron Job Monitor",
@@ -202,4 +203,5 @@ async def shutdown_event():
     active_monitors.clear()
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
