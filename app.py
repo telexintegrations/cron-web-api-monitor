@@ -38,12 +38,27 @@ app = FastAPI(
     version="1.0.0"
 )
 
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://telex.im",
+        "https://staging.telex.im",
+        "https://telextest.im",
+        "https://staging.telax.im"
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Content-Type",
+        "Authorization",
+        "X-Requested-With",
+        "Accept",
+        "Origin",
+        "Access-Control-Allow-Origin"
+    ],
+    expose_headers=["Content-Type", "Authorization"],
+    max_age=3600  # Cache preflight requests for 1 hour
 )
 
 # Global monitor instance
@@ -100,44 +115,44 @@ async def get_integration_json(request: Request):
         }
     })
 async def run_monitoring_task(payload: MonitorPayload):
-    """Background task to run cron monitoring checks"""
+    """Background task to run cron monitoring checks with improved formatting"""
     try:
-        # Parse cron jobs from settings
-        jobs_config = payload.settings.get("Cron Jobs", "[]")
-        if isinstance(jobs_config, str):
-            jobs_config = json.loads(jobs_config)
-        elif isinstance(jobs_config, list):
-            jobs_config = jobs_config
+        # Get cron jobs from monitoring config or settings
+        if payload.monitoring_config and payload.monitoring_config.cron_jobs:
+            cron_jobs = [CronJobConfig(**job.dict()) for job in payload.monitoring_config.cron_jobs]
         else:
-            jobs_config = json.loads(str(jobs_config))
-            
-        cron_jobs = [CronJobConfig(**job) for job in jobs_config]
-        
+            jobs_config = payload.settings.get("Cron Jobs", [])
+            if isinstance(jobs_config, str):
+                jobs_config = json.loads(jobs_config)
+            cron_jobs = [CronJobConfig(**job) for job in jobs_config]
+
         # Setup simulated jobs if enabled
         if payload.settings.get("Simulation Mode", True):
             monitor.setup_simulated_jobs(cron_jobs)
-            
-            # Randomly start jobs (30% chance)
             if random.random() < 0.3:
                 monitor.start_random_job()
 
         # Run monitoring checks
         results = monitor.monitor_jobs(cron_jobs)
 
-        # Convert results to serializable format
+        # Format results
         formatted_results = []
         for result in results:
             formatted_result = {
                 "name": str(result["name"]),
                 "status": str(result["status"]),
                 "message": str(result["message"]),
-                "running": bool(result["running"])
+                "running": bool(result["running"]),
+                "last_run": result.get("last_run", "Unknown"),
+                "next_run": result.get("next_run", "Unknown")
             }
             formatted_results.append(formatted_result)
 
-        # Prepare message for webhook
+        # Generate detailed report
         status = all(r["status"] == "ok" for r in formatted_results)
-        message = "🔍 Cron Job Status Report:\n\n"
+        message = "**Cron Monitoring Report**\n\n"
+        message += "🔍 Job Status Summary:\n"
+        message += "━━━━━━━━━━━━━━━━━━━━━━\n\n"
         
         for result in formatted_results:
             status_emoji = {
@@ -147,22 +162,43 @@ async def run_monitoring_task(payload: MonitorPayload):
                 "running": "⚙️"
             }.get(result["status"], "❓")
             
-            message += f"{status_emoji} {result['name']}\n"
-            message += f"   Status: {result['status'].upper()}\n"
-            message += f"   Details: {result['message']}\n"
+            # Job header with status
+            message += f"**{result['name']}** {status_emoji}\n"
+            
+            # Status details with proper indentation
+            message += f"├─ Status: `{result['status'].upper()}`\n"
+            message += f"├─ Details: {result['message']}\n"
+            
+            # Add timing information
+            if result["last_run"] != "Unknown":
+                message += f"├─ Last Run: {result['last_run']}\n"
+            if result["next_run"] != "Unknown":
+                message += f"├─ Next Run: {result['next_run']}\n"
+            
+            # Running status
             if result["running"]:
-                message += f"   🔄 Currently running\n"
+                message += f"└─ 🔄 Currently Running\n"
+            else:
+                message += "└─────────────\n"
             message += "\n"
 
-        # Prepare webhook payload
+        # Add summary statistics
+        if len(formatted_results) > 1:
+            total_ok = sum(1 for r in formatted_results if r["status"] == "ok")
+            total_running = sum(1 for r in formatted_results if r["running"])
+            message += f"\n📊 Summary:\n"
+            message += f"• {total_ok}/{len(formatted_results)} jobs healthy\n"
+            if total_running > 0:
+                message += f"• {total_running} jobs currently running\n"
+
         webhook_payload = {
             "username": "Cron Monitor",
             "event_name": "Cron Check",
-            "status": "success" if status else "error",
+            "status": "success" if status else "warning",
             "message": message
         }
 
-        # Send results to webhook
+        # Send webhook
         async with httpx.AsyncClient() as client:
             await client.post(
                 payload.return_url,
@@ -170,7 +206,11 @@ async def run_monitoring_task(payload: MonitorPayload):
             )
 
     except Exception as e:
-        error_msg = f"🚨 Monitoring task failed: {str(e)}"
+        error_msg = (
+            "**Cron Monitor Error**\n\n"
+            f"🚨 Monitoring task failed:\n"
+            f"```\n{str(e)}\n```"
+        )
         webhook_error_payload = {
             "username": "Cron Monitor",
             "event_name": "Monitoring Error",
@@ -183,7 +223,6 @@ async def run_monitoring_task(payload: MonitorPayload):
                 payload.return_url,
                 json=webhook_error_payload
             )
-
 
 @app.post("/tick")
 async def handle_tick(payload: MonitorPayload, background_tasks: BackgroundTasks):
