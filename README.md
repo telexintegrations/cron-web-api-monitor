@@ -70,7 +70,19 @@ curl -X POST http://localhost:8000/monitor \
     "webhook_url": "https://your-webhook-url.com/endpoint"
   }'
 ```
+# Cron Job Monitor
 
+    This application provides real-time monitoring of cron jobs and system metrics.
+
+    ## Screenshot
+
+    ![Cron Monitor Dashboard](images/cronjob.png)
+
+    ## Features
+
+    * Real-time cron job status updates
+    * Dynamic system metrics display
+    * Intelligent insights and alerts
 ## Deployment
 
 ### Deploying to Render
