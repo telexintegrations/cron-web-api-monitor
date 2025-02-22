@@ -13,7 +13,7 @@ import random
 import threading
 
 # Constants
-WEBHOOK_URL = "https://ping.telex.im/v1/webhooks/019517d3-7a2e-7f80-8cfb-614494172063"
+WEBHOOK_URL = "https://ping.telex.im/v1/webhooks/01952c5a-d68b-7c5f-bd0e-6e691c8a7f35"
 
 class CronJob(BaseModel):
     name: str
